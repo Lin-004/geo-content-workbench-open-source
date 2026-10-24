@@ -1,0 +1,50 @@
+{
+  "name": "geo-content-workbench",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "setup:env": "node scripts/init-env.mjs",
+    "dev": "next dev --port 3001",
+    "build": "next build",
+    "start": "next start --port 3001",
+    "typecheck": "tsc --noEmit",
+    "payload": "payload",
+    "generate:types": "payload generate:types",
+    "generate:importmap": "payload generate:importmap",
+    "db:migrate": "node scripts/migrate-workbench.mjs",
+    "db:seed": "tsx scripts/seed.ts",
+    "test:isolated": "node scripts/test-isolated.mjs",
+    "test:workflow": "node --import tsx/esm --test tests/plan-fulfillment.test.ts",
+    "test:p0": "node --import tsx/esm --test tests/p0-regression.test.ts",
+    "test:body": "node --import tsx/esm --test tests/content-body-table.test.ts",
+    "test:security": "node --import tsx/esm --test tests/runtime-secrets.test.ts",
+    "db:check": "node scripts/check-schema.mjs",
+    "check:public": "node scripts/check-public.mjs"
+  },
+  "dependencies": {
+    "@payloadcms/db-postgres": "^3.88.0",
+    "@payloadcms/next": "^3.88.0",
+    "@payloadcms/richtext-lexical": "^3.88.0",
+    "@payloadcms/ui": "^3.88.0",
+    "dotenv": "^16.6.1",
+    "graphql": "^16.11.0",
+    "linkedom": "^0.18.13",
+    "mammoth": "^1.12.2",
+    "next": "^16.3.3",
+    "payload": "^3.88.0",
+    "pdf-parse": "^2.4.5",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
+    "sharp": "^0.34.2",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
+  },
+  "devDependencies": {
+    "@types/node": "^24.12.3",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3"
+  },
+  "license": "MIT"
+}

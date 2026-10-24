@@ -1,0 +1,4 @@
+interface:
+  display_name: "GEO 工作台"
+  short_description: "管理 GEO 工作台项目与每日规划、内容入库、审核、发布记录和交付待办"
+  default_prompt: "使用 $geo-workbench 查看指定项目本周交付进度，列出缺失文章、待审内容和待发布平台。"

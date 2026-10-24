@@ -1,0 +1,51 @@
+import { prepareXiaohongshuEnum, migrateXiaohongshu } from "./xiaohongshu-schema.mjs";
+import { prepareVideoScriptEnums, migrateVideoScripts } from "./video-script-schema.mjs";
+import { migrateArticlePlans } from "./article-plan-schema.mjs";
+import dotenv from 'dotenv';
+import { createRequire } from 'node:module';
+import { createHash } from 'node:crypto';
+import { mkdir, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { migratePlanImport } from './plan-import-schema.mjs';
+dotenv.config({path:'.env.local'});
+const require = createRequire(import.meta.url);
+const { Client } = createRequire(require.resolve('@payloadcms/db-postgres'))('pg');
+const db = new Client({connectionString:process.env.DATABASE_URL});
+await db.connect();
+try {
+  const tables = (await db.query("SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE' ORDER BY table_name")).rows.map(row=>row.table_name);
+  const backup = {version:'20261009-fulfillment',createdAt:new Date().toISOString(),tables:{},indexes:(await db.query("SELECT indexname,indexdef FROM pg_indexes WHERE schemaname='public' AND tablename=ANY($1)",[tables])).rows};
+  for (const table of tables) backup.tables[table] = (await db.query(`SELECT * FROM "${table.replaceAll('"','""')}"`)).rows;
+  await mkdir('.backups',{recursive:true});
+  const backupPath = path.resolve('.backups',`before-fulfillment-${Date.now()}.json`);
+  await writeFile(backupPath,JSON.stringify(backup),{mode:0o600,flag:'wx'});
+  console.log('已备份受影响记录：'+backupPath);
+  // PostgreSQL requires a newly added enum label to commit before it is used.
+  await db.query("ALTER TYPE enum_content_plans_status ADD VALUE IF NOT EXISTS 'creating'");
+  await prepareVideoScriptEnums(db);
+  await prepareXiaohongshuEnum(db);
+  await db.query('BEGIN');
+  await db.query('ALTER TABLE content_assets ADD COLUMN IF NOT EXISTS revision_of_id integer REFERENCES content_assets(id) ON DELETE SET NULL');
+  await db.query('ALTER TABLE audit_records ADD COLUMN IF NOT EXISTS content_snapshot jsonb');
+  await db.query('ALTER TABLE content_plan_items ADD COLUMN IF NOT EXISTS item_key varchar');
+  const items=(await db.query('SELECT id,article_category,question FROM content_plan_items WHERE item_key IS NULL')).rows;
+  for(const i of items) await db.query('UPDATE content_plan_items SET item_key=$1 WHERE id=$2',[`${i.article_category}:${createHash('sha256').update(String(i.question||'').trim()).digest('hex').slice(0,20)}`,i.id]);
+  await db.query('ALTER TABLE content_plan_items ALTER COLUMN item_key SET NOT NULL');
+  await db.query('CREATE UNIQUE INDEX IF NOT EXISTS contentplan_itemkey_idx ON content_plan_items(content_plan_id,item_key)');
+  await db.query("CREATE UNIQUE INDEX IF NOT EXISTS project_plandate_idx ON content_plans(project_id,((plan_date AT TIME ZONE 'Asia/Shanghai')::date))");
+  await db.query('ALTER TABLE publication_tasks ADD COLUMN IF NOT EXISTS cancelled_at timestamptz');
+  await db.query('CREATE UNIQUE INDEX IF NOT EXISTS active_asset_platform_idx ON publication_tasks(content_asset_id,platform) WHERE cancelled_at IS NULL');
+  await db.query('ALTER TABLE content_assets ADD COLUMN IF NOT EXISTS content_plan_item_id integer REFERENCES content_plan_items(id) ON DELETE SET NULL');
+  // Link only a single item and a single asset in a legacy category. Ambiguous records remain unlinked.
+  await db.query(`UPDATE content_assets a SET content_plan_item_id=i.id FROM content_plan_items i WHERE a.content_plan_item_id IS NULL AND a.deleted_at IS NULL AND a.content_plan_id=i.content_plan_id AND a.article_category::text=i.article_category::text AND (a.question=i.question OR a.title=i.title OR (a.question IS NULL AND (SELECT count(*) FROM content_plan_items x WHERE x.content_plan_id=i.content_plan_id AND x.article_category::text=i.article_category::text)=1)) AND (SELECT count(*) FROM content_assets x WHERE x.content_plan_id=a.content_plan_id AND x.article_category=a.article_category AND x.deleted_at IS NULL)=1`);
+  await db.query('CREATE UNIQUE INDEX IF NOT EXISTS active_asset_plan_item_idx ON content_assets(content_plan_item_id) WHERE deleted_at IS NULL AND content_plan_item_id IS NOT NULL');
+  await db.query("UPDATE content_plans p SET status='creating' WHERE EXISTS(SELECT 1 FROM content_assets a WHERE a.content_plan_id=p.id AND a.deleted_at IS NULL) AND EXISTS(SELECT 1 FROM content_plan_items i WHERE i.content_plan_id=p.id AND NOT EXISTS(SELECT 1 FROM content_assets a WHERE a.content_plan_item_id=i.id AND a.deleted_at IS NULL))");
+  await db.query('CREATE TABLE IF NOT EXISTS workbench_schema_versions(version varchar PRIMARY KEY,applied_at timestamptz NOT NULL DEFAULT now())');
+  await db.query("INSERT INTO workbench_schema_versions(version) VALUES('20261009-fulfillment') ON CONFLICT DO NOTHING");
+  await migratePlanImport(db);
+  await migrateArticlePlans(db);
+  await migrateVideoScripts(db);
+  await migrateXiaohongshu(db);
+  await db.query('COMMIT');
+  console.log('增量迁移完成；未删除旧表、记录或索引。');
+} catch(error) { await db.query('ROLLBACK'); throw error; } finally { await db.end(); }

@@ -1,0 +1,8 @@
+[Unit]
+Description=Back up GEO workbench database and uploads
+After=postgresql.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/geo-workbench-backup
+UMask=0077

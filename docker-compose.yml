@@ -1,0 +1,14 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: geo
+      POSTGRES_PASSWORD: geo_dev_only
+      POSTGRES_DB: geo_workbench
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - geo-postgres:/var/lib/postgresql/data
+
+volumes:
+  geo-postgres:
